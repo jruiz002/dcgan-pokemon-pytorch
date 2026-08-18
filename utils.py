@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -78,3 +79,53 @@ def plot_losses(losses_G, losses_D, output_dir="outputs/plots"):
     
     plt.savefig(os.path.join(output_dir, "loss_curves.png"))
     plt.close()
+
+
+def save_training_history(losses_G, losses_D, output_path="outputs/training_history.json", **extra):
+    """Guarda métricas numéricas para poder analizarlas sin reentrenar."""
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    history = {
+        "loss_G": [float(value) for value in losses_G],
+        "loss_D": [float(value) for value in losses_D],
+    }
+    history.update(extra)
+
+    with open(output_path, "w", encoding="utf-8") as file:
+        json.dump(history, file, indent=2)
+
+
+def estimate_jsd(losses_D):
+    """
+    Estima JSD a partir de loss_D = -V(D, G):
+        JSD_hat = (V + log(4)) / 2 = (log(4) - loss_D) / 2.
+
+    No recorta el resultado a [0, log(2)]. Un valor fuera del intervalo teórico
+    es información útil: indica que D no era óptimo o que la pérdida registrada
+    no coincide exactamente con el objetivo minimax teórico.
+    """
+    losses_D = np.asarray(losses_D, dtype=np.float64)
+    return (np.log(4.0) - losses_D) / 2.0
+
+
+def plot_jsd(losses_D, output_dir="outputs/task2/plots"):
+    """Grafica la estimación empírica de JSD para todas las épocas registradas."""
+    os.makedirs(output_dir, exist_ok=True)
+    jsd_values = estimate_jsd(losses_D)
+    epochs = np.arange(1, len(jsd_values) + 1)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(epochs, jsd_values, color="purple", label=r"$\widehat{JSD}$")
+    plt.axhline(0.0, color="black", linestyle="--", linewidth=1, label="Óptimo teórico (0)")
+    plt.xlabel("Épocas")
+    plt.ylabel(r"$\widehat{JSD}(p_{data}\,\Vert\,p_G)$")
+    plt.title("Estimación empírica de la divergencia Jensen-Shannon")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "jsd_evolution.png"), dpi=150)
+    plt.close()
+
+    return jsd_values

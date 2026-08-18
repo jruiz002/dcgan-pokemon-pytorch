@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from dataset import get_dataloader
 from models import Generator, Discriminator, weights_init, Z_DIM
-from utils import save_image_grid, plot_losses
+from utils import save_image_grid, plot_losses, save_training_history
 
 # Semilla fija para reproducibilidad — garantiza que los pesos iniciales
 # y el ruido fijo sean los mismos en cada ejecución.
@@ -132,6 +132,21 @@ def train():
         
         D_losses.append(avg_loss_D)
         G_losses.append(avg_loss_G)
+
+        # Persistir el historial en cada época evita perder las métricas si el
+        # proceso se interrumpe y permite realizar el análisis de la Task 2.2.
+        save_training_history(
+            G_losses,
+            D_losses,
+            seed=SEED,
+            epochs_completed=epoch,
+            real_label=REAL_LABEL_SMOOTH,
+            fake_label=FAKE_LABEL,
+            discriminator_loss_definition=(
+                "BCE_real + BCE_fake; equals -V(D,G) only with hard labels "
+                "and without instance noise"
+            ),
+        )
         
         print(f"[{epoch:2d}/{EPOCHS}] Loss_D: {avg_loss_D:.4f}  Loss_G: {avg_loss_G:.4f}  "
               f"D(real): {output_real.mean().item():.3f}  D(fake): {output_fake.mean().item():.3f}  "
@@ -146,6 +161,19 @@ def train():
     
     # Producir visualización de curvas de pérdida (Task 1.3)
     plot_losses(G_losses, D_losses)
+    os.makedirs("outputs/checkpoints", exist_ok=True)
+    torch.save(
+        {
+            "epoch": EPOCHS,
+            "generator": netG.state_dict(),
+            "discriminator": netD.state_dict(),
+            "optimizer_G": optimizerG.state_dict(),
+            "optimizer_D": optimizerD.state_dict(),
+            "loss_G": G_losses,
+            "loss_D": D_losses,
+        },
+        "outputs/checkpoints/task1_final.pt",
+    )
     print("Entrenamiento finalizado. Visualizaciones guardadas en 'outputs/'.")
 
 if __name__ == '__main__':
