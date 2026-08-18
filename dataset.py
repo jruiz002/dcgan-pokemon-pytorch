@@ -2,6 +2,7 @@ import os
 import requests
 from io import BytesIO
 from PIL import Image
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 
@@ -32,20 +33,38 @@ class PokemonDataset(Dataset):
             try:
                 response = requests.get(url)
                 if response.status_code == 200:
-                    img = Image.open(BytesIO(response.content)).convert('RGB')
-                    img.save(os.path.join(self.data_dir, f"{i}.png"))
+                    # Guardamos el PNG original con su canal alfa intacto
+                    img_raw = Image.open(BytesIO(response.content))
+                    img_raw.save(os.path.join(self.data_dir, f"{i}.png"))
                 if i % 100 == 0:
                     print(f"Descargadas {i}/898 imágenes...")
             except Exception as e:
                 print(f"Error descargando la imagen {i}: {e}")
         print("Descarga finalizada.")
 
+    def _composite_on_white(self, img: Image.Image) -> Image.Image:
+        """
+        Pega el sprite sobre un fondo blanco para manejar la transparencia.
+        Los sprites de Pokémon tienen fondo transparente (RGBA). Si hacemos
+        .convert('RGB') directamente, el fondo transparente se convierte en
+        negro puro, lo que crea un patrón artificial que el discriminador
+        aprende trivialmente. Al usar fondo blanco obtenemos imágenes más
+        ricas y diversas para el entrenamiento.
+        """
+        if img.mode == 'RGBA':
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[3])  # Canal alfa como máscara
+            return background
+        return img.convert('RGB')
+
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
         img_name = os.path.join(self.data_dir, self.image_files[idx])
-        image = Image.open(img_name).convert('RGB')
+        img_raw = Image.open(img_name)
+        # Fix clave: compositar sobre fondo blanco en lugar de convertir directamente
+        image = self._composite_on_white(img_raw)
         
         if self.transform:
             image = self.transform(image)
@@ -54,11 +73,12 @@ class PokemonDataset(Dataset):
 
 def get_dataloader(batch_size=32, data_dir='data/pokemon', img_size=64):
     dataset = PokemonDataset(data_dir=data_dir, img_size=img_size, download=True)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
     return dataloader
 
 if __name__ == "__main__":
     dataloader = get_dataloader(batch_size=32)
     for imgs in dataloader:
         print("Forma del batch:", imgs.shape)
+        print("Min/Max del tensor:", imgs.min().item(), imgs.max().item())
         break

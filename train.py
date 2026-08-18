@@ -6,11 +6,18 @@ from dataset import get_dataloader
 from models import Generator, Discriminator, weights_init, Z_DIM
 from utils import save_image_grid, plot_losses
 
-# Hiperparámetros
+# Hiperparámetros — fijados por el Task 1.2
 BATCH_SIZE = 32
 LR = 2e-4
 BETA1 = 0.5
 BETA2 = 0.999
+
+# Técnica de estabilización: Label Smoothing
+# En lugar de etiquetas duras 0/1, usamos 0/0.9 para las reales.
+# Esto evita que el discriminador se vuelva extremadamente seguro
+# demasiado rápido, dejándole feedback útil al generador.
+REAL_LABEL_SMOOTH = 0.9
+FAKE_LABEL = 0.0
 EPOCHS = 50
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
@@ -45,29 +52,43 @@ def train():
         epoch_loss_G = 0.0
         epoch_loss_D = 0.0
         
+        # Ruido de instancia decreciente: añadimos ruido gaussiano pequeño
+        # a las imágenes que entran al discriminador. Decae con las épocas
+        # para ser fuerte al inicio (cuando D aprende demasiado rápido) y
+        # desaparecer al final para no degradar la calidad de la salida.
+        instance_noise_std = max(0.0, 0.1 * (1.0 - epoch / EPOCHS))
+        
         for i, data in enumerate(dataloader):
             # Obtener batch de imágenes reales
             real_imgs = data.to(DEVICE)
             b_size = real_imgs.size(0)
             
-            # Etiquetas reales (1) y falsas (0)
-            label_real = torch.ones((b_size,), dtype=torch.float, device=DEVICE)
-            label_fake = torch.zeros((b_size,), dtype=torch.float, device=DEVICE)
+            # Etiquetas con Label Smoothing: reales=0.9, falsas=0.0
+            # Técnica de Salimans et al. para estabilizar el entrenamiento.
+            label_real = torch.full((b_size,), REAL_LABEL_SMOOTH, dtype=torch.float, device=DEVICE)
+            label_fake = torch.full((b_size,), FAKE_LABEL, dtype=torch.float, device=DEVICE)
             
             # ==========================================
             # PASO DEL DISCRIMINADOR
             # ==========================================
             netD.zero_grad()
             
+            # Añadir ruido de instancia a imágenes reales para regularizar el discriminador
+            noisy_real = real_imgs + instance_noise_std * torch.randn_like(real_imgs)
+            
             # a) Pérdida sobre datos reales
-            output_real = netD(real_imgs)
+            output_real = netD(noisy_real)
             errD_real = criterion(output_real, label_real)
             
             # b) Pérdida sobre datos falsos
             noise = torch.randn(b_size, Z_DIM, 1, 1, device=DEVICE)
             fake_imgs = netG(noise)
+            
+            # Añadir ruido de instancia a imágenes falsas también
+            noisy_fake = fake_imgs.detach() + instance_noise_std * torch.randn_like(fake_imgs.detach())
+            
             # Usar .detach() para no propagar gradientes hacia el Generador
-            output_fake = netD(fake_imgs.detach())
+            output_fake = netD(noisy_fake)
             errD_fake = criterion(output_fake, label_fake)
             
             # c) Sumar ambas pérdidas y actualizar D
@@ -105,7 +126,9 @@ def train():
         D_losses.append(avg_loss_D)
         G_losses.append(avg_loss_G)
         
-        print(f"[{epoch}/{EPOCHS}] Loss_D: {avg_loss_D:.4f} Loss_G: {avg_loss_G:.4f}")
+        print(f"[{epoch:2d}/{EPOCHS}] Loss_D: {avg_loss_D:.4f}  Loss_G: {avg_loss_G:.4f}  "
+              f"D(real): {output_real.mean().item():.3f}  D(fake): {output_fake.mean().item():.3f}  "
+              f"Ruido inst.: {instance_noise_std:.4f}")
         
         # Guardar grilla de imágenes (Task 1.2)
         with torch.no_grad():
