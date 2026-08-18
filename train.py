@@ -6,6 +6,13 @@ from dataset import get_dataloader
 from models import Generator, Discriminator, weights_init, Z_DIM
 from utils import save_image_grid, plot_losses
 
+# Semilla fija para reproducibilidad — garantiza que los pesos iniciales
+# y el ruido fijo sean los mismos en cada ejecución.
+SEED = 42
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
 # Hiperparámetros — fijados por el Task 1.2
 BATCH_SIZE = 32
 LR = 2e-4
